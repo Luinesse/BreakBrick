@@ -150,6 +150,18 @@ Player p(SCREEN_WIDTH / 2, SCREEN_HEIGHT, 100.0f);
 void InitBricks();
 bool CheckCollision(const Ball& ball, const Brick& brick);
 
+// 더블버퍼링
+
+HBITMAP g_hBitmap;
+BYTE* g_pPixels = nullptr;
+HDC g_hMemDC;
+
+void InitBackBuffer(HWND hWnd, int width, int height);
+void Present(HWND hWnd);
+void ClearBuffer(BYTE r, BYTE g, BYTE b);
+void SetPixel(int x, int y, BYTE r, BYTE g, BYTE b);
+void Render(HWND hWnd);
+
 // 윈도우 프로시저 함수 선언
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -178,6 +190,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         SCREEN_WIDTH, SCREEN_HEIGHT,                       // 크기
         NULL, NULL, hInstance, NULL
     );
+
+    InitBackBuffer(hWnd, SCREEN_WIDTH, SCREEN_HEIGHT);
 
     // 벽돌의 초기화는 윈도우 화면이 만들어지고 수행한다.
     InitBricks();
@@ -258,27 +272,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
+        BeginPaint(hWnd, &ps);
 
-        // 이전에 있던 내용을 밀어버리기 위해 화면 전체를 흰색으로 다시 색칠
-        RECT rc;
-        GetClientRect(hWnd, &rc);
-        FillRect(hdc, &rc, (HBRUSH)(WHITE_BRUSH));
-
-        // 공을 그려준다.
-        for (auto& ball : vBall) {
-            ball->draw(hdc);
-        }
-
-        // 벽돌을 그려준다.
-        for (auto& brick : vBricks) {
-            brick->draw(hdc);
-        }
-
-        // 플레이어 포신 방향 업데이트
-        p.updateDirection();
-        // 포신을 그려준다.
-        p.draw(hdc);
+        Render(hWnd);
 
         EndPaint(hWnd, &ps);
 
@@ -327,4 +323,70 @@ bool CheckCollision(const Ball& ball, const Brick& brick) {
 
     return !(ballRight < brickLeft || ballLeft > brickRight ||
         ballBottom < brickTop || ballTop > brickBottom);
+}
+
+void InitBackBuffer(HWND hWnd, int width, int height) {
+    HDC hdc = GetDC(hWnd);
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    g_hMemDC = CreateCompatibleDC(hdc);
+    g_hBitmap = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, (void**)&g_pPixels, NULL, 0);
+    SelectObject(g_hMemDC, g_hBitmap);
+
+    ReleaseDC(hWnd, hdc);
+}
+
+void Present(HWND hWnd) {
+    HDC hdc = GetDC(hWnd);
+    BitBlt(hdc, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, g_hMemDC, 0, 0, SRCCOPY);
+    ReleaseDC(hWnd, hdc);
+}
+
+void ClearBuffer(BYTE r, BYTE g, BYTE b) {
+    for (int x = 0; x < SCREEN_WIDTH; x++) {
+        for (int y = 0; y < SCREEN_HEIGHT; y++) {
+            int idx = (y * SCREEN_WIDTH + x) * 4;
+            g_pPixels[idx + 0] = b;
+            g_pPixels[idx + 1] = g;
+            g_pPixels[idx + 2] = r;
+            g_pPixels[idx + 3] = 255;
+        }
+    }
+}
+
+void SetPixel(int x, int y, BYTE r, BYTE g, BYTE b) {
+    if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT)   return;
+    int idx = (y * SCREEN_WIDTH + x) * 4;
+    g_pPixels[idx + 0] = b;
+    g_pPixels[idx + 1] = g;
+    g_pPixels[idx + 2] = r;
+    g_pPixels[idx + 3] = 255;
+}
+
+void Render(HWND hWnd) {
+    ClearBuffer(255, 255, 255);
+
+    // 공을 그려준다.
+    for (auto& ball : vBall) {
+        ball->draw(g_hMemDC);
+    }
+
+    // 벽돌을 그려준다.
+    for (auto& brick : vBricks) {
+        brick->draw(g_hMemDC);
+    }
+
+    // 플레이어 포신 방향 업데이트
+    p.updateDirection();
+    // 포신을 그려준다.
+    p.draw(g_hMemDC);
+
+    Present(hWnd);
 }
